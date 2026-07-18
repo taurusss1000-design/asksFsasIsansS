@@ -1,7 +1,7 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Window = WindUI:CreateWindow({
-    Title = "King Vypers",
+    Title = "----",
     Icon = "rbxassetid://139467646163013",
     Folder = "KingVypers",
     Background = "rbxassetid://97514324988224",
@@ -868,6 +868,22 @@ FavoritSection:Dropdown({
     end
 })
 
+local favSelectedMutations = {}
+
+FavoritSection:Dropdown({
+    Title = "Pilih Mutation",
+    Multi = true,
+    Values = {"Electric", "GlassFin", "Shiny", "Zombie", "Metal"},
+    Value = {},
+    AllowNone = true,
+    Callback = function(selected)
+        favSelectedMutations = {}
+        for _, mutation in ipairs(selected) do
+            favSelectedMutations[mutation] = true
+        end
+    end
+})
+
 local autoFavEnabled = false
 local autoFavConnection = nil
 
@@ -888,10 +904,33 @@ FavoritSection:Toggle({
                 autoFavConnection = RewardRE.FishCaught.OnClientEvent:Connect(function(data)
                     if not autoFavEnabled then return end
                     
-                    if type(data) == "table" and data.InstanceId and data.FishData and data.FishData.Rarity then
+                    if type(data) == "table" and data.InstanceId and data.FishData then
                         local rarity = data.FishData.Rarity
-                        if favSelectedRarities[rarity] then
-                            print("[Auto Favorit] Favoriting " .. tostring(data.FishData.Name) .. " (" .. rarity .. ")")
+                        local fishName = data.FishData.Name or ""
+                        local mutation = data.Mutation or data.FishData.Mutation
+                        
+                        local shouldFavorite = false
+                        
+                        -- Cek Rarity
+                        if rarity and favSelectedRarities[rarity] then
+                            shouldFavorite = true
+                        end
+                        
+                        -- Cek Mutation
+                        if not shouldFavorite then
+                            for mut, _ in pairs(favSelectedMutations) do
+                                -- Periksa properti mutation atau apakah nama ikan mengandung nama mutasi (ex: Shiny Blacktip Grouper)
+                                if (type(mutation) == "string" and string.find(mutation, mut)) or 
+                                   (type(mutation) == "table" and table.find(mutation, mut)) or
+                                   (string.find(fishName, mut)) then
+                                    shouldFavorite = true
+                                    break
+                                end
+                            end
+                        end
+                        
+                        if shouldFavorite then
+                            print("[Auto Favorit] Favoriting " .. tostring(fishName))
                             pcall(function()
                                 ShopRF.ToggleFavoriteFish:InvokeServer(data.InstanceId)
                             end)
