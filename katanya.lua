@@ -1454,9 +1454,24 @@ local function handleEvent(position, bossName)
         setreadonly(mt, true)
     end)
 
-    -- Tunggu StartPulling max 120 detik, atau sampai EventEnd keluar
+    -- Scan text untuk nentuin timeout (kalau-kalau eventnya masih lama)
+    local timeout = 600 -- fallback 10 menit
+    pcall(function()
+        local readyPanel = PlayerGui:WaitForChild("BossFishEventGUI", 2):WaitForChild("ReadyPanel", 2)
+        local label = readyPanel:WaitForChild("TextLabel", 2)
+        local text = label.Text
+        print("📊 Status Event pas nunggu StartPulling:", text)
+        
+        local secs = string.match(text, "in: (%d+)s") or string.match(text, "(%d+)s")
+        if secs then
+            timeout = tonumber(secs) + 60 -- Kasih buffer 60 detik dari sisa waktu countdown
+            print("⏱️ Sisa waktu event:", secs, "detik. Set timeout nunggu StartPulling jadi:", timeout, "detik")
+        end
+    end)
+
+    -- Tunggu StartPulling sesuai timeout, atau sampai EventEnd keluar
     local waitPull = tick()
-    while not isPullingStarted and not isEventEnded and tick() - waitPull < 120 do
+    while not isPullingStarted and not isEventEnded and tick() - waitPull < timeout do
         task.wait(0.1)
     end
     
@@ -1507,10 +1522,19 @@ local function handleEvent(position, bossName)
     
     -- Cek juga dari UI kalau-kalau onClientEvent kelewat
     task.spawn(function()
+        task.wait(5) -- Kasih jeda dulu sebelum mulai ngecek UI biar gak false positive awal
         while not isEventEnded and shared.isDoingEvent do
-            local hasVictory = PlayerGui:FindFirstChild("BossEndgameGUI") and PlayerGui.BossEndgameGUI.Enabled
-            local hasReward = PlayerGui:FindFirstChild("RewardGui") and PlayerGui.RewardGui.Enabled
+            local hasVictory = false
+            local hasReward = false
+            pcall(function()
+                hasVictory = PlayerGui.BossEndgameGUI.Enabled and PlayerGui.BossEndgameGUI.EndgameUI.Visible
+            end)
+            pcall(function()
+                hasReward = PlayerGui.RewardGui.Enabled and PlayerGui.RewardGui.RewardPanel.Visible
+            end)
+            
             if hasVictory or hasReward then
+                print("🏆 UI Kemenangan kedetect! Event berarti kelar.")
                 isEventEnded = true
             end
             task.wait(1)
