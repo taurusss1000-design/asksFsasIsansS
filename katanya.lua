@@ -1,9 +1,9 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Window = WindUI:CreateWindow({
-    Title = "----",
+    Title = "King Vypers",
     Icon = "rbxassetid://139467646163013",
-    Folder = "----",
+    Folder = "KingVypers",
     Background = "rbxassetid://97514324988224",
     BackgroundImageTransparency = 0.35,
     Size = UDim2.new(0, 530, 0, 300),
@@ -277,7 +277,7 @@ local Fishing = Window:Tab({
 -- =============================================
 -- ⚡ INSTANT FISHING TOGGLE
 -- =============================================
-local InstantFishSection = Fishing:Section({ Title = "Instant Fish", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = true })
+local InstantFishSection = Fishing:Section({ Title = "Instant Fish", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = false })
 
 
 local instantFishEnabled = false
@@ -388,9 +388,11 @@ InstantFishSection:Toggle({
                         local waitStart = tick()
                         while not isResolved and instantFishEnabled and tick() - waitStart < 15 do
                             task.spawn(function()
-                                pcall(function() FISHING_PULL_INPUT:InvokeServer(sessionId, "tap") end)
+                                for i = 1, 5 do
+                                    pcall(function() FISHING_PULL_INPUT:InvokeServer(sessionId, "tap") end)
+                                end
                             end)
-                            task.wait(0.05)
+                            task.wait()
                         end
 
                         print("[Instant Fish] Selesai! resolved:", isResolved)
@@ -424,7 +426,7 @@ InstantFishSection:Toggle({
 -- 🐟 Legit FISH SECTION
 -- =============================================
 
-local LegitFishSection = Fishing:Section({ Title = "Legit Fish", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = true })
+local LegitFishSection = Fishing:Section({ Title = "Legit Fish", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = false })
 
 local legitFishingEnabled = false
 local legitFishingConnection = nil
@@ -594,13 +596,15 @@ LegitFishSection:Toggle({
                     RewardRF.FishingPullInput:InvokeServer(currentUUID, "begin")
                     task.wait(0.05)
 
-                    -- Spam tap tiap 0.05s sampai resolved (max 15 detik)
+                    -- Spam tap tiap frame (super cepat) sampai resolved (max 15 detik)
                     local pullStart = tick()
                     while isPulling and legitFishingEnabled and tick() - pullStart < 15 do
                         task.spawn(function()
-                            pcall(function() RewardRF.FishingPullInput:InvokeServer(currentUUID, "tap") end)
+                            for i = 1, 5 do
+                                pcall(function() RewardRF.FishingPullInput:InvokeServer(currentUUID, "tap") end)
+                            end
                         end)
-                        task.wait(0.05)
+                        task.wait()
                     end
 
                     resolvedConn2:Disconnect()
@@ -679,8 +683,209 @@ LegitFishSection:Toggle({
 
 
 -- =============================================
+-- Support Functions FISH SECTION
+-- =============================================
+
+local SupportFishSection = Fishing:Section({ Title = "Support Fishing", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = false })
+
+local WalkOnWater = (function()
+    local LocalPlayer = game:GetService("Players").LocalPlayer
+    local Workspace = game:GetService("Workspace")
+    local RunService = game:GetService("RunService")
+    local M = { Enabled = false, Platform = nil, AlignPos = nil, Connection = nil }
+    local PLATFORM_SIZE = 14
+    local OFFSET = 2.5
+    local WATER_Y = nil
+
+    local function getChar()
+        local char = LocalPlayer.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not hrp then return end
+        return char, hum, hrp
+    end
+
+    -- Cek apakah tepat di bawah player itu air (bukan tanah/part lain)
+    local function isAboveWater(hrp)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        params.FilterDescendantsInstances = { LocalPlayer.Character }
+        params.IgnoreWater = false
+
+        -- Cast pendek dari kaki ke bawah
+        local result = Workspace:Raycast(
+            hrp.Position,
+            Vector3.new(0, -50, 0),
+            params
+        )
+
+        if result then
+            -- Kalau kena terrain, cek apakah materialnya air
+            if result.Instance:IsA("Terrain") then
+                return result.Material == Enum.Material.Water, result.Position.Y
+            end
+            -- Kena part biasa = tanah/darat
+            return false, nil
+        end
+
+        -- Ga kena apa-apa = void, anggap bukan air
+        return false, nil
+    end
+
+    local function getWaterY(hrp)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        params.FilterDescendantsInstances = { LocalPlayer.Character }
+        params.IgnoreWater = false
+
+        local result = Workspace:Raycast(
+            hrp.Position + Vector3.new(0, 5, 0),
+            Vector3.new(0, -500, 0),
+            params
+        )
+
+        if result and result.Instance:IsA("Terrain") and result.Material == Enum.Material.Water then
+            return result.Position.Y
+        end
+        return nil
+    end
+
+    local function createPlatform()
+        if M.Platform then M.Platform:Destroy() end
+        local p = Instance.new("Part")
+        p.Name = "WaterLockPlatform"
+        p.Size = Vector3.new(PLATFORM_SIZE, 1, PLATFORM_SIZE)
+        p.Anchored = true
+        p.CanCollide = true
+        p.CanQuery = false
+        p.CanTouch = false
+        p.Transparency = 1
+        p.Parent = Workspace
+        M.Platform = p
+    end
+
+    local function setupAlign(hrp)
+        if M.AlignPos then M.AlignPos:Destroy() end
+        local att = hrp:FindFirstChild("WOW_Att") or Instance.new("Attachment")
+        att.Name = "WOW_Att"
+        att.Parent = hrp
+
+        local ap = Instance.new("AlignPosition")
+        ap.Attachment0 = att
+        ap.MaxForce = math.huge
+        ap.MaxVelocity = math.huge
+        ap.Responsiveness = 200
+        ap.RigidityEnabled = true
+        ap.Parent = hrp
+        M.AlignPos = ap
+    end
+
+    local function cleanup()
+        if M.Connection then M.Connection:Disconnect() M.Connection = nil end
+        if M.AlignPos then M.AlignPos:Destroy() M.AlignPos = nil end
+        if M.Platform then M.Platform:Destroy() M.Platform = nil end
+        WATER_Y = nil
+    end
+
+    function M.Start()
+        if M.Enabled then return end
+        local _, hum, hrp = getChar()
+        if not hum or not hrp then
+            warn("[WOW] Karakter tidak ditemukan!") return
+        end
+
+        -- Paksa keluar swimming dulu
+        if hum:GetState() == Enum.HumanoidStateType.Swimming then
+            for _ = 1, 40 do
+                hrp.Velocity = Vector3.new(hrp.Velocity.X, 60, hrp.Velocity.Z)
+                task.wait(0.05)
+                if hum:GetState() ~= Enum.HumanoidStateType.Swimming then break end
+            end
+            task.wait(0.1)
+        end
+
+        -- Simpan water Y saat Q ditekan
+        WATER_Y = getWaterY(hrp)
+        if not WATER_Y then
+            warn("[WOW] Tidak ada air di bawah! Pindah ke area air dulu.")
+            return
+        end
+
+        M.Enabled = true
+        createPlatform()
+        setupAlign(hrp)
+
+        print("[WOW] ON - Water Y locked at:", WATER_Y)
+
+        M.Connection = RunService.Heartbeat:Connect(function()
+            if not M.Enabled then return end
+            local _, _, curHRP = getChar()
+            if not curHRP then return end
+
+            local pos = curHRP.Position
+
+            -- Cek apakah tepat di bawah player itu air atau bukan
+            local aboveWater, _ = isAboveWater(curHRP)
+
+            if aboveWater then
+                -- Di atas air = lock ke water Y
+                if M.Platform then
+                    M.Platform.CFrame = CFrame.new(pos.X, WATER_Y - 0.5, pos.Z)
+                end
+                if M.AlignPos then
+                    M.AlignPos.Position = Vector3.new(pos.X, WATER_Y + OFFSET, pos.Z)
+                end
+            else
+                -- Di darat / gunung = bebasin player, sembunyiin platform
+                if M.Platform then
+                    M.Platform.CFrame = CFrame.new(pos.X, -9999, pos.Z)
+                end
+                if M.AlignPos then
+                    -- Set ke posisi player saat ini biar ga narik kemana-mana
+                    M.AlignPos.Position = pos
+                end
+            end
+        end)
+    end
+
+    function M.Stop()
+        M.Enabled = false
+        cleanup()
+        print("[WOW] OFF")
+    end
+
+    LocalPlayer.CharacterAdded:Connect(function()
+        if M.Enabled then
+            task.wait(0.5)
+            cleanup()
+            M.Enabled = false
+            M.Start()
+        end
+    end)
+
+    return M
+end)()
+
+SupportFishSection:Toggle({
+    Title = "Walk on Water",
+    Icon = "waves",
+    Default = false,
+    Callback = function(state)
+        if state then
+            WalkOnWater.Start()
+        else
+            WalkOnWater.Stop()
+        end
+    end,
+})
+
+
+
+-- =============================================
 -- Sell Tab
 -- =============================================
+local favoritedFishTracker = {}
 
 local SellTab = Window:Tab({
     Title = "Shell",
@@ -732,11 +937,102 @@ local function ExecuteSell()
     local SELL_RF = game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.FishermanShopService.RF.SellSelectedFish
     local toSell = {}
 
+    -- 1. Scan dan simpan ID ikan yang terfavorit di dalam tas terlebih dahulu
+    local currentFavorited = {}
+    
+    -- Cek dari memori tracker Auto Favorit
+    for id, _ in pairs(favoritedFishTracker) do
+        currentFavorited[id] = true
+    end
+    
+    -- Cek dari attribute tas saat ini (jaga-jaga kalau gamenya update)
+    for _, v in ipairs(backpack:GetChildren()) do
+        local instId = v:GetAttribute("FishInstanceId")
+        if instId then
+            if v:GetAttribute("Favorited") or v:GetAttribute("Favorite") or v:GetAttribute("Locked") then
+                currentFavorited[instId] = true
+            elseif v:FindFirstChild("Favorited") or v:FindFirstChild("Favorite") or v:FindFirstChild("Locked") then
+                currentFavorited[instId] = true
+            else
+                local cs = game:GetService("CollectionService")
+                if cs:HasTag(v, "Favorite") or cs:HasTag(v, "Favorited") then
+                    currentFavorited[instId] = true
+                end
+            end
+        end
+    end
+
+    -- Cek dari UI FishCollectionGUI (User Logic)
+    local pGui = player:FindFirstChild("PlayerGui")
+    if pGui then
+        local gui = pGui:FindFirstChild("FishCollectionGUI")
+        if gui and gui:FindFirstChild("MainPanel") and gui.MainPanel:FindFirstChild("ContentFrame") then
+            local contentFrame = gui.MainPanel.ContentFrame
+            
+            -- build list dari backpack untuk dicocokkan dengan UI
+            local backpackList = {}
+            for _, item in ipairs(backpack:GetChildren()) do
+                local fId = item:GetAttribute("FishId")
+                local instId = item:GetAttribute("FishInstanceId")
+                if fId and instId then
+                    table.insert(backpackList, {
+                        fishId = fId,
+                        instanceId = instId,
+                        used = false
+                    })
+                end
+            end
+
+            -- kumpulkan card dan urutkan berdasarkan LayoutOrder (agar urutannya sama persis dengan visual UI)
+            local uiCards = {}
+            for _, card in ipairs(contentFrame:GetChildren()) do
+                if string.sub(card.Name, 1, 8) == "FishCard" then
+                    table.insert(uiCards, card)
+                end
+            end
+            
+            table.sort(uiCards, function(a, b)
+                local orderA = a:IsA("GuiObject") and a.LayoutOrder or 0
+                local orderB = b:IsA("GuiObject") and b.LayoutOrder or 0
+                return orderA < orderB
+            end)
+
+            -- scan card di GUI secara berurutan
+            for _, card in ipairs(uiCards) do
+                local favImg = card:FindFirstChild("Favorite")
+                local isFav = favImg and favImg.Visible or false
+                local cardName = string.gsub(card.Name, "FishCard_", "")
+
+                -- cari match pertama yang belum dipakai
+                -- [MASALAH Ikan Kembar]: Kita sort UI berdasarkan LayoutOrder supaya sinkron dengan urutan Backpack
+                local cardInstId = card:GetAttribute("FishInstanceId") or card:GetAttribute("InstanceId") or card:GetAttribute("UUID")
+                
+                if cardInstId then
+                    if isFav then
+                        currentFavorited[cardInstId] = true
+                    end
+                else
+                    for _, data in ipairs(backpackList) do
+                        if not data.used and data.fishId == cardName then
+                            data.used = true
+                            if isFav then
+                                currentFavorited[data.instanceId] = true
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Lakukan Sell untuk ikan yang tidak ada di daftar favorit
     for _, v in ipairs(backpack:GetChildren()) do
         local rarity = v:GetAttribute("Rarity")
         local fishId = v:GetAttribute("FishId")
         local instanceId = v:GetAttribute("FishInstanceId")
-        if rarity and fishId and instanceId and selectedRarities[rarity] then
+        
+        if rarity and fishId and instanceId and selectedRarities[rarity] and not currentFavorited[instanceId] then
             table.insert(toSell, {
                 FishId = fishId,
                 Count = 1,
@@ -918,13 +1214,29 @@ FavoritSection:Toggle({
                         
                         -- Cek Mutation
                         if not shouldFavorite then
+                            local fishNameLower = string.lower(fishName)
                             for mut, _ in pairs(favSelectedMutations) do
-                                -- Periksa properti mutation atau apakah nama ikan mengandung nama mutasi (ex: Shiny Blacktip Grouper)
-                                if (type(mutation) == "string" and string.find(mutation, mut)) or 
-                                   (type(mutation) == "table" and table.find(mutation, mut)) or
-                                   (string.find(fishName, mut)) then
+                                local mutLower = string.lower(mut)
+                                
+                                -- 1. Cek dari nama ikan (case insensitive)
+                                if string.find(fishNameLower, mutLower) then
                                     shouldFavorite = true
                                     break
+                                end
+                                
+                                -- 2. Cek dari properti Mutation/Mutations
+                                local mutData = data.Mutation or data.Mutations or (data.FishData and (data.FishData.Mutation or data.FishData.Mutations))
+                                if type(mutData) == "string" and string.find(string.lower(mutData), mutLower) then
+                                    shouldFavorite = true
+                                    break
+                                elseif type(mutData) == "table" then
+                                    for _, m in pairs(mutData) do
+                                        if type(m) == "string" and string.find(string.lower(m), mutLower) then
+                                            shouldFavorite = true
+                                            break
+                                        end
+                                    end
+                                    if shouldFavorite then break end
                                 end
                             end
                         end
@@ -933,6 +1245,7 @@ FavoritSection:Toggle({
                             print("[Auto Favorit] Favoriting " .. tostring(fishName))
                             pcall(function()
                                 ShopRF.ToggleFavoriteFish:InvokeServer(data.InstanceId)
+                                favoritedFishTracker[data.InstanceId] = true
                             end)
                         end
                     end
@@ -945,5 +1258,175 @@ FavoritSection:Toggle({
                 autoFavConnection = nil
             end
         end
+    end
+})
+
+
+-- =============================================
+-- Teleport Tab
+-- =============================================
+
+local TeleportTab = Window:Tab({
+    Title = "Teleport",
+    Icon = "crosshair",
+    IconColor = Mains,
+    IconShape = "Square",
+    Border = true,
+})
+
+local TeleportSection = TeleportTab:Section({ Title = "Teleport Player", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = true })
+
+
+local Players = game:GetService("Players")
+
+-- build list nama player (exclude self kalau mau)
+local function getPlayerNames()
+    local names = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        table.insert(names, p.Name)
+    end
+    return names
+end
+
+local selectedPlayer = nil
+
+local PlayerDropdown = TeleportSection:Dropdown({
+    Title = "Select Player",
+    Values = getPlayerNames(),
+    Value = getPlayerNames()[1],
+    Callback = function(option)
+        selectedPlayer = option
+    end
+})
+
+-- refresh list player (opsional)
+TeleportSection:Button({
+    Title = "Refresh Players",
+    Callback = function()
+        local names = getPlayerNames()
+        PlayerDropdown:SetValues(names)
+        PlayerDropdown:SetValue(names[1])
+    end
+})
+
+TeleportSection:Button({
+    Title = "Teleport Now",
+    Callback = function()
+        if not selectedPlayer then
+            return
+        end
+        local target = Players:FindFirstChild(selectedPlayer)
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            local localChar = Players.LocalPlayer.Character
+            if localChar and localChar:FindFirstChild("HumanoidRootPart") then
+                localChar.HumanoidRootPart.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
+            end
+        end
+    end
+})
+
+
+local TeleportToEvent = TeleportTab:Section({ Title = "Teleport Event", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = true })
+
+-- lokasi spawn --
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local selectedEvent = nil
+local autoTeleportEnabled = false
+local autoTeleportConnection = nil
+
+-- build event list dari workspace.Event
+local function getEventNames()
+    local names = {}
+    for _, folder in ipairs(workspace.Event:GetChildren()) do
+        table.insert(names, folder.Name)
+    end
+    return names
+end
+
+local function getEventPosition(eventName)
+    local folder = workspace.Event:FindFirstChild(eventName)
+    if folder then
+        local point = folder:FindFirstChild("Event Point")
+        if point then
+            return point.Position
+        end
+    end
+    return nil
+end
+
+local function teleportToEvent(eventName)
+    local pos = getEventPosition(eventName)
+    if not pos then return end
+    local char = Players.LocalPlayer.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+    end
+end
+
+-- Dropdown event
+local EventDropdown = TeleportToEvent:Dropdown({
+    Title = "Select Event",
+    Desc = "Pilih event tujuan",
+    Values = getEventNames(),
+    Value = getEventNames()[1],
+    Callback = function(option)
+        selectedEvent = option
+    end
+})
+selectedEvent = getEventNames()[1]
+
+-- Toggle auto teleport
+TeleportToEvent:Toggle({
+    Title = "Auto Teleport",
+    Desc = "Auto teleport saat event muncul di workspace",
+    Value = false,
+    Callback = function(state)
+        autoTeleportEnabled = state
+
+        if state then
+            -- monitor workspace.Event, kalau folder muncul langsung teleport
+            autoTeleportConnection = workspace.Event.ChildAdded:Connect(function(child)
+                if autoTeleportEnabled then
+                    -- tunggu Event Point ready
+                    task.wait(0.5)
+                    if selectedEvent and child.Name == selectedEvent then
+                        teleportToEvent(selectedEvent)
+                    else
+                        -- teleport ke event apapun yang muncul
+                        teleportToEvent(child.Name)
+                    end
+                end
+            end)
+        else
+            if autoTeleportConnection then
+                autoTeleportConnection:Disconnect()
+                autoTeleportConnection = nil
+            end
+        end
+    end
+})
+
+-- Button teleport now
+TeleportToEvent:Button({
+    Title = "Teleport Now",
+    Desc = "Teleport ke event yang dipilih",
+    Callback = function()
+        if selectedEvent then
+            teleportToEvent(selectedEvent)
+        end
+    end
+})
+
+-- Refresh event list
+TeleportToEvent:Button({
+    Title = "Refresh Events",
+    Desc = "Update list event terbaru",
+    Callback = function()
+        local names = getEventNames()
+        EventDropdown:SetValues(names)
+        EventDropdown:SetValue(names[1])
+        selectedEvent = names[1]
     end
 })
