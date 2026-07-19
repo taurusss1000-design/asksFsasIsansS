@@ -1,7 +1,7 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 -- Nonaktifkan print & warn untuk modul ini agar console tidak spam
-local print = function(...) end
-local warn = function(...) end
+-- local print = function(...) end
+-- local warn = function(...) end
 
 
 local Window = WindUI:CreateWindow({
@@ -45,7 +45,7 @@ Window:Tag({
 })
 
 Window:Tag({
-    Title = "BETA",
+    Title = "V 0.1",
     Color = Purple,
 })
 
@@ -377,6 +377,7 @@ InstantFishSection:Toggle({
                 end)
 
                 while instantFishEnabled do
+                    if shared.isDoingEvent then task.wait(1) continue end
                     isResolved = false
                     activeSessionId = nil
                     local playerPos, castPos, rodName = getCastPos()
@@ -727,6 +728,8 @@ local WalkOnWater = (function()
     local PLATFORM_SIZE = 14
     local OFFSET = 2.5
     local WATER_Y = nil
+    local TICK = 0
+    local SCAN_INTERVAL = 10 -- scanWaterY tiap 10 frame sekali aja
 
     local function getChar()
         local char = LocalPlayer.Character
@@ -737,45 +740,26 @@ local WalkOnWater = (function()
         return char, hum, hrp
     end
 
-    -- Cek apakah tepat di bawah player itu air (bukan tanah/part lain)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    rayParams.IgnoreWater = false
+
     local function isAboveWater(hrp)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Blacklist
-        params.FilterDescendantsInstances = { LocalPlayer.Character }
-        params.IgnoreWater = false
-
-        -- Cast pendek dari kaki ke bawah
-        local result = Workspace:Raycast(
-            hrp.Position,
-            Vector3.new(0, -50, 0),
-            params
-        )
-
-        if result then
-            -- Kalau kena terrain, cek apakah materialnya air
-            if result.Instance:IsA("Terrain") then
-                return result.Material == Enum.Material.Water, result.Position.Y
-            end
-            -- Kena part biasa = tanah/darat
-            return false, nil
+        rayParams.FilterDescendantsInstances = { LocalPlayer.Character }
+        local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -50, 0), rayParams)
+        if result and result.Instance:IsA("Terrain") then
+            return result.Material == Enum.Material.Water
         end
-
-        -- Ga kena apa-apa = void, anggap bukan air
-        return false, nil
+        return false
     end
 
-    local function getWaterY(hrp)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Blacklist
-        params.FilterDescendantsInstances = { LocalPlayer.Character }
-        params.IgnoreWater = false
-
+    local function scanWaterY(hrp)
+        rayParams.FilterDescendantsInstances = { LocalPlayer.Character }
         local result = Workspace:Raycast(
-            hrp.Position + Vector3.new(0, 5, 0),
+            hrp.Position + Vector3.new(0, 100, 0),
             Vector3.new(0, -500, 0),
-            params
+            rayParams
         )
-
         if result and result.Instance:IsA("Terrain") and result.Material == Enum.Material.Water then
             return result.Position.Y
         end
@@ -801,7 +785,6 @@ local WalkOnWater = (function()
         local att = hrp:FindFirstChild("WOW_Att") or Instance.new("Attachment")
         att.Name = "WOW_Att"
         att.Parent = hrp
-
         local ap = Instance.new("AlignPosition")
         ap.Attachment0 = att
         ap.MaxForce = math.huge
@@ -817,6 +800,7 @@ local WalkOnWater = (function()
         if M.AlignPos then M.AlignPos:Destroy() M.AlignPos = nil end
         if M.Platform then M.Platform:Destroy() M.Platform = nil end
         WATER_Y = nil
+        TICK = 0
     end
 
     function M.Start()
@@ -826,56 +810,39 @@ local WalkOnWater = (function()
             warn("[WOW] Karakter tidak ditemukan!") return
         end
 
-        -- Paksa keluar swimming dulu
-        if hum:GetState() == Enum.HumanoidStateType.Swimming then
-            for _ = 1, 40 do
-                hrp.Velocity = Vector3.new(hrp.Velocity.X, 60, hrp.Velocity.Z)
-                task.wait(0.05)
-                if hum:GetState() ~= Enum.HumanoidStateType.Swimming then break end
-            end
-            task.wait(0.1)
-        end
-
-        -- Simpan water Y saat Q ditekan
-        WATER_Y = getWaterY(hrp)
-        if not WATER_Y then
-            warn("[WOW] Tidak ada air di bawah! Pindah ke area air dulu.")
-            return
-        end
-
         M.Enabled = true
         createPlatform()
         setupAlign(hrp)
-
-        print("[WOW] ON - Water Y locked at:", WATER_Y)
+        print("[WOW] ON")
 
         M.Connection = RunService.Heartbeat:Connect(function()
             if not M.Enabled then return end
-            local _, _, curHRP = getChar()
-            if not curHRP then return end
+            local _, curHum, curHRP = getChar()
+            if not curHum or not curHRP then return end
 
             local pos = curHRP.Position
+            TICK += 1
 
-            -- Cek apakah tepat di bawah player itu air atau bukan
-            local aboveWater, _ = isAboveWater(curHRP)
+            -- Swimming handler
+            if curHum:GetState() == Enum.HumanoidStateType.Swimming then
+                curHRP.Velocity = Vector3.new(curHRP.Velocity.X, 60, curHRP.Velocity.Z)
+            end
 
-            if aboveWater then
-                -- Di atas air = lock ke water Y
-                if M.Platform then
-                    M.Platform.CFrame = CFrame.new(pos.X, WATER_Y - 0.5, pos.Z)
-                end
-                if M.AlignPos then
-                    M.AlignPos.Position = Vector3.new(pos.X, WATER_Y + OFFSET, pos.Z)
-                end
+            -- ScanWaterY tiap 10 frame bukan tiap frame
+            if TICK % SCAN_INTERVAL == 0 then
+                local y = scanWaterY(curHRP)
+                if y then WATER_Y = y end
+            end
+
+            -- isAboveWater tiap frame (ringan, raycast pendek)
+            local aboveWater = isAboveWater(curHRP)
+
+            if aboveWater and WATER_Y then
+                M.Platform.CFrame = CFrame.new(pos.X, WATER_Y - 0.5, pos.Z)
+                M.AlignPos.Position = Vector3.new(pos.X, WATER_Y + OFFSET, pos.Z)
             else
-                -- Di darat / gunung = bebasin player, sembunyiin platform
-                if M.Platform then
-                    M.Platform.CFrame = CFrame.new(pos.X, -9999, pos.Z)
-                end
-                if M.AlignPos then
-                    -- Set ke posisi player saat ini biar ga narik kemana-mana
-                    M.AlignPos.Position = pos
-                end
+                M.Platform.CFrame = CFrame.new(pos.X, -9999, pos.Z)
+                M.AlignPos.Position = pos
             end
         end)
     end
@@ -911,6 +878,82 @@ SupportFishSection:Toggle({
     end,
 })
 
+-- =============================================
+-- AUTO EQUIP ROD MODULE
+-- =============================================
+local AutoEquipRod = (function()
+    local M = {
+        Enabled = false,
+        Thread = nil,
+    }
+
+    function M.Start()
+        if M.Enabled then return end
+        M.Enabled = true
+        print("[AutoEquipRod] ON")
+
+        M.Thread = task.spawn(function()
+            local LP = game:GetService("Players").LocalPlayer
+            while M.Enabled do
+                local char = LP.Character
+                if char then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    local equippedTool = char:FindFirstChildOfClass("Tool")
+
+                    -- Kalau ga pegang rod sama sekali
+                    if hum and not equippedTool then
+                        local backpack = LP:FindFirstChild("Backpack")
+                        if backpack then
+                            -- Cari rod apapun di backpack (prioritas: yang namanya ada "Rod")
+                            local rod = nil
+                            for _, item in ipairs(backpack:GetChildren()) do
+                                if item:IsA("Tool") and item.Name:lower():find("rod") then
+                                    rod = item
+                                    break
+                                end
+                            end
+                            -- Kalau ga ada "rod", equip tool pertama yang ada
+                            if not rod then
+                                rod = backpack:FindFirstChildOfClass("Tool")
+                            end
+
+                            if rod then
+                                hum:EquipTool(rod)
+                                print("[AutoEquipRod] Equip:", rod.Name)
+                            end
+                        end
+                    end
+                end
+                task.wait(1) -- Cek setiap 1 detik
+            end
+        end)
+    end
+
+    function M.Stop()
+        if not M.Enabled then return end
+        M.Enabled = false
+        if M.Thread then
+            task.cancel(M.Thread)
+            M.Thread = nil
+        end
+        print("[AutoEquipRod] OFF")
+    end
+
+    return M
+end)()
+
+SupportFishSection:Toggle({
+    Title = "Auto Equip Rod",
+    Icon = "zap",
+    Default = false,
+    Callback = function(state)
+        if state then
+            AutoEquipRod.Start()
+        else
+            AutoEquipRod.Stop()
+        end
+    end,
+})
 
 
 -- =============================================
@@ -960,126 +1003,38 @@ SellSection:Input({
 })
 
 local function ExecuteSell()
-    print("[AutoSell] Sedang mencari ikan di backpack...")
-    local player = game:GetService("Players").LocalPlayer
-    local backpack = player:FindFirstChild("Backpack")
-    if not backpack then return end
+    print("[AutoSell] Memulai Auto Sell (GUI Method)...")
+    local Players = game:GetService("Players")
+    local LP = Players.LocalPlayer
+    local PlayerGui = LP:FindFirstChild("PlayerGui")
+    local RS = game:GetService("ReplicatedStorage")
+    local Knit = RS.Packages._Index["sleitnick_knit@1.7.0"].knit.Services
+    local FISH_SOLD = Knit.FishermanShopService.RE.FishSold
 
-    local SELL_RF = game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.FishermanShopService.RF.SellSelectedFish
-    local toSell = {}
-
-    -- 1. Scan dan simpan ID ikan yang terfavorit di dalam tas terlebih dahulu
-    local currentFavorited = {}
-    
-    -- Cek dari memori tracker Auto Favorit
-    for id, _ in pairs(favoritedFishTracker) do
-        currentFavorited[id] = true
-    end
-    
-    -- Cek dari attribute tas saat ini (jaga-jaga kalau gamenya update)
-    for _, v in ipairs(backpack:GetChildren()) do
-        local instId = v:GetAttribute("FishInstanceId")
-        if instId then
-            if v:GetAttribute("Favorited") or v:GetAttribute("Favorite") or v:GetAttribute("Locked") then
-                currentFavorited[instId] = true
-            elseif v:FindFirstChild("Favorited") or v:FindFirstChild("Favorite") or v:FindFirstChild("Locked") then
-                currentFavorited[instId] = true
-            else
-                local cs = game:GetService("CollectionService")
-                if cs:HasTag(v, "Favorite") or cs:HasTag(v, "Favorited") then
-                    currentFavorited[instId] = true
-                end
-            end
+    local function waitForUI()
+        print("⏳ Nunggu FishermanShopGUI kebuka...")
+        local gui = PlayerGui:WaitForChild("FishermanShopGUI", 10)
+        if not gui then
+            print("❌ FishermanShopGUI ga muncul!")
+            return false
         end
+        print("✅ UI kebuka!")
+        return true
     end
 
-    -- Cek dari UI FishCollectionGUI (User Logic)
-    local pGui = player:FindFirstChild("PlayerGui")
-    if pGui then
-        local gui = pGui:FindFirstChild("FishCollectionGUI")
-        if gui and gui:FindFirstChild("MainPanel") and gui.MainPanel:FindFirstChild("ContentFrame") then
-            local contentFrame = gui.MainPanel.ContentFrame
-            
-            -- build list dari backpack untuk dicocokkan dengan UI
-            local backpackList = {}
-            for _, item in ipairs(backpack:GetChildren()) do
-                local fId = item:GetAttribute("FishId")
-                local instId = item:GetAttribute("FishInstanceId")
-                if fId and instId then
-                    table.insert(backpackList, {
-                        fishId = fId,
-                        instanceId = instId,
-                        used = false
-                    })
-                end
-            end
-
-            -- kumpulkan card dan urutkan berdasarkan LayoutOrder (agar urutannya sama persis dengan visual UI)
-            local uiCards = {}
-            for _, card in ipairs(contentFrame:GetChildren()) do
-                if string.sub(card.Name, 1, 8) == "FishCard" then
-                    table.insert(uiCards, card)
-                end
-            end
-            
-            table.sort(uiCards, function(a, b)
-                local orderA = a:IsA("GuiObject") and a.LayoutOrder or 0
-                local orderB = b:IsA("GuiObject") and b.LayoutOrder or 0
-                return orderA < orderB
-            end)
-
-            -- scan card di GUI secara berurutan
-            for _, card in ipairs(uiCards) do
-                local favImg = card:FindFirstChild("Favorite")
-                local isFav = favImg and favImg.Visible or false
-                local cardName = string.gsub(card.Name, "FishCard_", "")
-
-                -- cari match pertama yang belum dipakai
-                -- [MASALAH Ikan Kembar]: Kita sort UI berdasarkan LayoutOrder supaya sinkron dengan urutan Backpack
-                local cardInstId = card:GetAttribute("FishInstanceId") or card:GetAttribute("InstanceId") or card:GetAttribute("UUID")
-                
-                if cardInstId then
-                    if isFav then
-                        currentFavorited[cardInstId] = true
-                    end
-                else
-                    for _, data in ipairs(backpackList) do
-                        if not data.used and data.fishId == cardName then
-                            data.used = true
-                            if isFav then
-                                currentFavorited[data.instanceId] = true
-                            end
-                            break
-                        end
-                    end
-                end
-            end
+    local function clickButton(btn, name)
+        local ok, err = pcall(function()
+            firesignal(btn.MouseButton1Click)
+        end)
+        if ok then
+            print("✅ Klik " .. name)
+        else
+            print("❌ Gagal klik " .. name .. ":", err)
         end
+        task.wait(0.5)
     end
 
-    -- 2. Lakukan Sell untuk ikan yang tidak ada di daftar favorit
-    for _, v in ipairs(backpack:GetChildren()) do
-        local rarity = v:GetAttribute("Rarity")
-        local fishId = v:GetAttribute("FishId")
-        local instanceId = v:GetAttribute("FishInstanceId")
-        
-        if rarity and fishId and instanceId and selectedRarities[rarity] and not currentFavorited[instanceId] then
-            table.insert(toSell, {
-                FishId = fishId,
-                Count = 1,
-                InstanceId = instanceId
-            })
-        end
-    end
-
-    if #toSell == 0 then
-        print("[AutoSell] Ga ada ikan yang sesuai rarity terpilih!")
-        return
-    end
-
-    print("[AutoSell] Selling " .. #toSell .. " ikan...")
-
-    local character = player.Character or player.CharacterAdded:Wait()
+    local character = LP.Character or LP.CharacterAdded:Wait()
     local hrp = character:FindFirstChild("HumanoidRootPart")
     local originalCFrame = nil
 
@@ -1090,24 +1045,69 @@ local function ExecuteSell()
         task.wait(1.5) -- Tunggu sampai server acknowledge posisi
     end
 
-    -- Sell batch per 50
-    local sold = 0
-    for i = 1, #toSell, 50 do
-        local batch = {}
-        for j = i, math.min(i + 49, #toSell) do
-            table.insert(batch, toSell[j])
+    local prompt = nil
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("ProximityPrompt") and v.ActionText == "Sell Fish" then
+            prompt = v
+            break
         end
-        local success, result = pcall(function()
-            return SELL_RF:InvokeServer(batch)
-        end)
-        
-        if success and result then
-            sold += #batch
-        end
-        task.wait(0.2)
     end
 
-    print("[AutoSell] Berhasil jual", sold, "ikan!")
+    if not prompt then
+        print("❌ Prompt Sell Fish ga ketemu!")
+        if hrp and originalCFrame then hrp.CFrame = originalCFrame end
+        return
+    end
+
+    print("🐟 Trigger Sell Fish...")
+    fireproximityprompt(prompt)
+
+    if not waitForUI() then 
+        if hrp and originalCFrame then hrp.CFrame = originalCFrame end
+        return 
+    end
+    task.wait(0.5)
+
+    local ShopPanel = PlayerGui.FishermanShopGUI.ShopPanel
+    local CartPanel = PlayerGui.FishermanShopGUI.CartPanel
+
+    -- Listen FishSold sebelum klik confirm
+    local sellDone = false
+    local totalEarned = 0
+    local soldConn
+    soldConn = FISH_SOLD.OnClientEvent:Connect(function(data)
+        sellDone = true
+        totalEarned = data.Earned or 0
+        print("💰 FishSold! Earned:", data.Earned, "| NewMoney:", data.NewMoney, "| Quantity:", data.Quantity)
+        if data.SoldFish then
+            for _, fish in ipairs(data.SoldFish) do
+                print("   🐟", fish.Name, "x" .. fish.Count, "| Value:", fish.Value)
+            end
+        end
+        soldConn:Disconnect()
+    end)
+
+    -- Step 1: SellAll
+    clickButton(ShopPanel.ActionBar.BtnFrame.SellAll, "SellAll")
+
+    -- Step 2: ViewCart
+    clickButton(ShopPanel.ActionBar.BtnFrame.ViewCart, "ViewCart")
+
+    -- Step 3: ConfirmSell
+    clickButton(CartPanel.CartActionFrame.ConfirmSellBtn, "ConfirmSellBtn")
+
+    -- Tunggu FishSold event max 5 detik
+    local timeout = tick()
+    while not sellDone and tick() - timeout < 5 do
+        task.wait(0.1)
+    end
+
+    if sellDone then
+        print("🏁 Auto Sell selesai! Total earned:", totalEarned)
+    else
+        print("⚠️ FishSold event ga kedetect, mungkin inventory kosong?")
+        soldConn:Disconnect()
+    end
 
     if hrp and originalCFrame then
         print("[AutoSell] Mengembalikan posisi player...")
@@ -1134,6 +1134,15 @@ SellSection:Toggle({
                     while autoSellEnabled and waited < (autoSellInterval * 60) do
                         task.wait(1)
                         waited += 1
+                    end
+
+                    -- Pause kalau lagi event biar ga tabrakan
+                    if shared.isDoingEvent then
+                        print("[Auto Sell] Lagi event, tunda sell dulu...")
+                        while shared.isDoingEvent and autoSellEnabled do
+                            task.wait(1)
+                        end
+                        print("[Auto Sell] Event selesai, lanjut sell!")
                     end
 
                     -- Setelah tunggu, baru sell
@@ -1299,7 +1308,7 @@ FavoritSection:Toggle({
 
 local TeleportTab = Window:Tab({
     Title = "Teleport",
-    Icon = "crosshair",
+    Icon = "lucide:arrow-left-right",
     IconColor = Mains,
     IconShape = "Square",
     Border = true,
@@ -1356,6 +1365,278 @@ TeleportSection:Button({
     end
 })
 
+-- =============================================
+-- AUTO EVENT MODULE
+-- =============================================
+local AutoEventSection = TeleportTab:Section({ Title = "Auto Event", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = true })
+
+local selectedEvents = {
+    ["Losi"] = false,
+    ["Windah"] = false
+}
+
+AutoEventSection:Dropdown({
+    Title = "Select Event Boss",
+    Multi = true,
+    Values = {"Losi", "Windah"},
+    Value = {},
+    Callback = function(selected)
+        selectedEvents.Losi = false
+        selectedEvents.Windah = false
+        for _, v in ipairs(selected) do
+            selectedEvents[v] = true
+        end
+    end
+})
+
+local autoEventEnabled = false
+local eventAnnounceConn = nil
+
+local function handleEvent(position, bossName)
+    if shared.isDoingEvent then return end
+    shared.isDoingEvent = true
+
+    local LP = game:GetService("Players").LocalPlayer
+    local char = LP.Character or LP.CharacterAdded:Wait()
+    local hrp = char:WaitForChild("HumanoidRootPart")
+    local PlayerGui = LP:WaitForChild("PlayerGui")
+
+    -- 1. Save original position
+    local originalCFrame = hrp.CFrame
+    print("✅ Menyimpan posisi awal:", originalCFrame)
+
+    -- 2. Teleport ke event
+    hrp.CFrame = CFrame.new(position + Vector3.new(0, 5, 0))
+    print("✅ Teleport ke event:", bossName, "| Pos:", position)
+
+    task.wait(5) -- Jeda 5 detik biar map/UI server bener-bener keload
+    print("🚨 LANGSUNG PARTICIPATE!")
+
+    -- 3. Participate
+    local ok, btn = pcall(function()
+        return PlayerGui.BossFishEventGUI.FishMonsterContainer.FishMonsterBtn
+    end)
+    if ok and btn then
+        firesignal(btn.Activated)
+        print("✅ PARTICIPATE!")
+    else
+        print("❌ Tombol participate ga ketemu!")
+    end
+
+    task.wait(1)
+
+    -- 5. Setup EventEnd listener DULU sebelum spam tap
+    local RS = game:GetService("ReplicatedStorage")
+    local Knit = RS.Packages._Index["sleitnick_knit@1.7.0"].knit.Services
+
+    local isEventEnded = false
+    local endConn
+    endConn = Knit.BossFishEventService.RE.EventEnd.OnClientEvent:Connect(function(data)
+        print("🏁 EventEnd diterima dari server! State:", data and data.State or "nil")
+        isEventEnded = true
+    end)
+
+    -- 5. Listen to StartPulling via namecall hook
+    print("⏳ Menunggu instruksi StartPulling dari game/server...")
+    local isPullingStarted = false
+    local mt = getrawmetatable(game)
+    local oldNamecall = mt.__namecall
+    
+    pcall(function()
+        setreadonly(mt, false)
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "InvokeServer" and tostring(self) == "StartPulling" then
+                isPullingStarted = true
+            end
+            return oldNamecall(self, ...)
+        end)
+        setreadonly(mt, true)
+    end)
+
+    -- Tunggu StartPulling max 120 detik, atau sampai EventEnd keluar
+    local waitPull = tick()
+    while not isPullingStarted and not isEventEnded and tick() - waitPull < 120 do
+        task.wait(0.1)
+    end
+    
+    -- balikin namecall
+    pcall(function()
+        setreadonly(mt, false)
+        mt.__namecall = oldNamecall
+        setreadonly(mt, true)
+    end)
+    
+    if isEventEnded then
+        print("⚠️ EventEnd sudah keluar sebelum StartPulling, skip tap...")
+        endConn:Disconnect()
+        task.wait(1)
+        pcall(function()
+            local cBtn1 = PlayerGui.BossEndgameGUI.EndgameUI.CloseButton
+            firesignal(cBtn1.Activated)
+            print("🏆 Close EndgameUI")
+        end)
+        task.wait(0.3)
+        pcall(function()
+            local cBtn2 = PlayerGui.RewardGui.RewardPanel.Header.CloseBtn
+            firesignal(cBtn2.MouseButton1Click)
+            print("🎁 Close RewardGui")
+        end)
+        task.wait(1)
+        hrp.CFrame = originalCFrame
+        print("🔙 Kembali ke posisi awal!")
+        shared.isDoingEvent = false
+        print("▶️ Instant Fishing dilanjutkan!")
+        return
+    end
+    
+    if isPullingStarted then
+        print("🎣 StartPulling terdeteksi! Lanjut ke tap...")
+    else
+        print("⚠️ Timeout nunggu StartPulling, lanjut aja...")
+    end
+    
+    -- 6. Spam tap event
+    local tapBossName = "Windah_SM"
+    if bossName:lower():find("losi") then
+        tapBossName = "Losi_Coral"
+    end
+    print("👾 Spam tap", tapBossName, "mulai!")
+    
+    local PlayerTap = Knit.BossFishEventService.RF.PlayerTap
+    
+    -- Cek juga dari UI kalau-kalau onClientEvent kelewat
+    task.spawn(function()
+        while not isEventEnded and shared.isDoingEvent do
+            local hasVictory = PlayerGui:FindFirstChild("BossEndgameGUI") and PlayerGui.BossEndgameGUI.Enabled
+            local hasReward = PlayerGui:FindFirstChild("RewardGui") and PlayerGui.RewardGui.Enabled
+            if hasVictory or hasReward then
+                isEventEnded = true
+            end
+            task.wait(1)
+        end
+    end)
+
+    -- Spam tap sampai EventEnd dari server atau UI selesai
+    while not isEventEnded and shared.isDoingEvent do
+        pcall(function() PlayerTap:InvokeServer(tapBossName) end)
+        task.wait(0.1)
+    end
+    
+    endConn:Disconnect()
+    print("🏁 Event selesai!")
+    
+    -- 7. Close GUI
+    task.wait(1)
+    pcall(function()
+        local cBtn1 = PlayerGui.BossEndgameGUI.EndgameUI.CloseButton
+        firesignal(cBtn1.Activated)
+        print("🏆 Close EndgameUI")
+    end)
+    task.wait(0.3)
+    pcall(function()
+        local cBtn2 = PlayerGui.RewardGui.RewardPanel.Header.CloseBtn
+        firesignal(cBtn2.MouseButton1Click)
+        print("🎁 Close RewardGui")
+    end)
+    
+    task.wait(1)
+
+    -- 8. Teleport Back
+    hrp.CFrame = originalCFrame
+    print("🔙 Kembali ke posisi awal!")
+
+    shared.isDoingEvent = false
+    print("▶️ Instant Fishing dilanjutkan!")
+end
+
+local function scanActiveEvent()
+    print("🔍 Scan event points...")
+    if selectedEvents["Windah"] then
+        local eventPoints = workspace:FindFirstChild("Event") and workspace.Event:FindFirstChild("WindahEvent")
+        if eventPoints then
+            for i, point in ipairs(eventPoints:GetChildren()) do
+                for _, child in ipairs(point:GetChildren()) do
+                    if child.Name:find("SeaMonsterTitleAnchor_") then
+                        local bossName = child.Name:gsub("SeaMonsterTitleAnchor_", "")
+                        print("🎯 Event aktif ditemukan di point #" .. i .. " | Boss:", bossName)
+                        task.spawn(handleEvent, child.Position, bossName)
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    if selectedEvents["Losi"] then
+        local ok, losiPillar = pcall(function()
+            return workspace.BossEventMarker_Losi_Clown.BossEventPillar
+        end)
+        if ok and losiPillar then
+            print("🎯 Losi event aktif!")
+            task.spawn(handleEvent, losiPillar.Position, "Losi_Clown")
+            return true
+        end
+    end
+
+    print("❌ Ga ada event aktif yang dipilih saat ini")
+    return false
+end
+
+AutoEventSection:Toggle({
+    Title = "Enable Auto Event",
+    Icon = "zap",
+    Default = false,
+    Callback = function(state)
+        autoEventEnabled = state
+        if state then
+            local RS = game:GetService("ReplicatedStorage")
+            local Knit = RS.Packages._Index["sleitnick_knit@1.7.0"].knit.Services
+            local EVENT_ANNOUNCE = Knit.BossFishEventService.RE.EventAnnounce
+            
+            print("👂 Listen EventAnnounce...")
+            eventAnnounceConn = EVENT_ANNOUNCE.OnClientEvent:Connect(function(data)
+                if not autoEventEnabled then return end
+                print("📢 EVENT ANNOUNCE!")
+                print("   Boss:", data.BossDisplayName, "(" .. data.BossName .. ")")
+                print("   State:", data.CurrentState)
+                
+                local bName = (data.BossName or ""):lower()
+                local isWindah = bName:find("windah") and selectedEvents["Windah"]
+                local isLosi = bName:find("losi") and selectedEvents["Losi"]
+                
+                if (isWindah or isLosi) and (data.CurrentState == "Announcing" or data.CurrentState == "Gathering") then
+                    local eventPos = Vector3.new(
+                        data.EventPosition[1],
+                        data.EventPosition[2],
+                        data.EventPosition[3]
+                    )
+                    print("📍 Event Position:", eventPos)
+                    task.spawn(handleEvent, eventPos, data.BossName)
+                end
+            end)
+            
+            scanActiveEvent()
+            print("✅ Auto Event aktif, nunggu event...")
+        else
+            if eventAnnounceConn then
+                eventAnnounceConn:Disconnect()
+                eventAnnounceConn = nil
+            end
+            -- Reset flag biar bisa deteksi event lagi kalau toggle dihidupin balik
+            shared.isDoingEvent = false
+            print("❌ Auto Event mati")
+        end
+    end
+})
+
+AutoEventSection:Button({
+    Title = "Teleport Now",
+    Callback = function()
+        scanActiveEvent()
+    end
+})
+
 
 -- =============================================
 -- Settings Tab
@@ -1363,7 +1644,7 @@ TeleportSection:Button({
 
 local SettingsTab = Window:Tab({
     Title = "Settings",
-    Icon = "crosshair",
+    Icon = "lucide:settings",
     IconColor = Mains,
     IconShape = "Square",
     Border = true,
@@ -1437,4 +1718,545 @@ SettingsSection:Toggle({
             print("[Anti-AFK] Deactivated!")
         end
     end
+})
+
+-- =============================================
+-- ANTI-ADMIN MODULE
+-- =============================================
+local AntiAdmin = (function()
+    local AA = {
+        Enabled = false,
+        Conns = {},
+        Kicked = false
+    }
+
+    local function isAdmin(player)
+        return player:GetAttribute("IsAdmin") == true
+            or player:GetAttribute("IsPrimaryAdmin") == true
+            or (player:GetAttribute("AdminAccess") ~= nil and player:GetAttribute("AdminAccess") ~= "")
+    end
+
+    local function safeKick(reason)
+        warn("🚨 " .. reason)
+        warn("🚪 Auto-kick untuk keamanan!")
+        local LP = game:GetService("Players").LocalPlayer
+        LP:Kick("🚨 SAFETY KICK\n" .. reason .. "\nScript otomatis keluar untuk keamanan.")
+    end
+
+    local function checkAdmin(player, context)
+        if AA.Kicked then return end
+        local LP = game:GetService("Players").LocalPlayer
+        if player == LP then return end
+        if isAdmin(player) then
+            AA.Kicked = true
+            safeKick("ADMIN/STAFF TERDETEKSI!\nNama: " .. player.Name .. "\nKonteks: " .. context)
+        end
+    end
+
+    function AA.Start()
+        if AA.Enabled then return end
+        AA.Enabled = true
+        AA.Kicked = false
+
+        local Players = game:GetService("Players")
+        local LP = Players.LocalPlayer
+
+        -- Scan sekarang
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == LP then
+                print("✅ " .. player.Name .. " = kamu sendiri")
+            elseif isAdmin(player) then
+                checkAdmin(player, "Already in server")
+            else
+                print("✅ " .. player.Name .. " = player biasa")
+            end
+        end
+
+        -- Listen player baru join
+        table.insert(AA.Conns, Players.PlayerAdded:Connect(function(player)
+            if not AA.Enabled then return end
+            task.wait(1)
+            checkAdmin(player, "Baru join server")
+
+            table.insert(AA.Conns, player:GetAttributeChangedSignal("IsAdmin"):Connect(function()
+                if AA.Enabled then checkAdmin(player, "IsAdmin berubah jadi true") end
+            end))
+            table.insert(AA.Conns, player:GetAttributeChangedSignal("IsPrimaryAdmin"):Connect(function()
+                if AA.Enabled then checkAdmin(player, "IsPrimaryAdmin berubah jadi true") end
+            end))
+            table.insert(AA.Conns, player:GetAttributeChangedSignal("AdminAccess"):Connect(function()
+                if AA.Enabled then checkAdmin(player, "AdminAccess berubah") end
+            end))
+        end))
+
+        -- Listen attribute player yang udah ada
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == LP then continue end
+            table.insert(AA.Conns, player:GetAttributeChangedSignal("IsAdmin"):Connect(function()
+                if AA.Enabled then checkAdmin(player, "IsAdmin berubah jadi true") end
+            end))
+            table.insert(AA.Conns, player:GetAttributeChangedSignal("IsPrimaryAdmin"):Connect(function()
+                if AA.Enabled then checkAdmin(player, "IsPrimaryAdmin berubah jadi true") end
+            end))
+            table.insert(AA.Conns, player:GetAttributeChangedSignal("AdminAccess"):Connect(function()
+                if AA.Enabled then checkAdmin(player, "AdminAccess berubah") end
+            end))
+        end
+        print("🛡️ Anti-Admin aktif! Auto-kick kalau ada admin masuk.")
+    end
+
+    function AA.Stop()
+        if not AA.Enabled then return end
+        AA.Enabled = false
+        for _, conn in ipairs(AA.Conns) do
+            if conn then conn:Disconnect() end
+        end
+        AA.Conns = {}
+        print("🛡️ Anti-Admin mati!")
+    end
+
+
+    return AA
+end)()
+
+SettingsSection:Toggle({
+    Title = "Anti Staff/Admin",
+    Icon = "shield",
+    Default = false,
+    Callback = function(state)
+        if state then
+            AntiAdmin.Start()
+        else
+            AntiAdmin.Stop()
+        end
+    end
+})
+
+-- =============================================
+-- Webhook Tab
+-- =============================================
+
+local WebhookTab = Window:Tab({
+    Title = "webhook",
+    Icon = "lucide:webhook",
+    IconColor = Mains,
+    IconShape = "Square",
+    Border = true,
+})
+-- =============================================
+-- WEBHOOK MODULE
+-- =============================================
+local WebhookModule = (function()
+    local M = {}
+
+    -- Cari HTTP request function yang tersedia
+    local function getHTTPRequest()
+        local funcs = { request, http_request,
+            (syn and syn.request),
+            (fluxus and fluxus.request),
+            (http and http.request),
+            (solara and solara.request),
+        }
+        for _, f in ipairs(funcs) do
+            if f and type(f) == "function" then return f end
+        end
+        return nil
+    end
+    local httpRequest = getHTTPRequest()
+    local HttpService = game:GetService("HttpService")
+
+    -- Config
+    M.FishConfig = {
+        WebhookURL = "",
+        DiscordUserID = "",
+        HideIdentity = "",
+        EnabledRarities = {},
+    }
+    M.DisconnectConfig = {
+        WebhookURL = "",
+        DiscordUserID = "",
+        HideIdentity = "",
+        Enabled = false
+    }
+
+    local RARITY_COLORS = {
+        Common    = 9807270,
+        Uncommon  = 3066993,
+        Rare      = 3447003,
+        Epic      = 10181046,
+        Legendary = 15844367,
+        Mythic    = 16711680,
+        Secret    = 65535,
+        Monster   = 16711935,
+    }
+
+    local isFishRunning = false
+    local fishEventConn = nil
+    local isDisconnectEnabled = false
+    local disconnectSetup = false
+
+    local function getDisplayName(config)
+        if config.HideIdentity and config.HideIdentity ~= "" then
+            return config.HideIdentity
+        end
+        local lp = game:GetService("Players").LocalPlayer
+        return lp.DisplayName or lp.Name
+    end
+
+    -- Ambil URL gambar dari ImageID rbxassetid via Roblox API
+    local function getImageUrl(imageID)
+        if not imageID then return "https://i.imgur.com/UMWNYK7.png" end
+        local id = tostring(imageID):match("%d+")
+        if not id then return "https://i.imgur.com/UMWNYK7.png" end
+        
+        local thumbnailUrl = string.format(
+            "https://thumbnails.roblox.com/v1/assets?assetIds=%s&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false",
+            id
+        )
+        
+        if httpRequest then
+            local success, result = pcall(function()
+                local response = httpRequest({ Url = thumbnailUrl, Method = "GET" })
+                if response and response.Body then
+                    local data = HttpService:JSONDecode(response.Body)
+                    if data and data.data and data.data[1] and data.data[1].imageUrl then
+                        return data.data[1].imageUrl
+                    end
+                end
+            end)
+            if success and result then return result end
+        end
+        
+        return "https://tr.rbxcdn.com/180DAY-" .. id .. "/420/420/Image/Png"
+    end
+
+    local function formatPrice(price)
+        local formatted = tostring(math.floor(tonumber(price) or 0))
+        return formatted:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+    end
+
+    local function sendFishWebhook(data)
+        if not M.FishConfig.WebhookURL or M.FishConfig.WebhookURL == "" then return end
+        if not httpRequest then return end
+
+        local fishData = data.FishData or {}
+        local rarity = fishData.Rarity or "Common"
+        local color = RARITY_COLORS[rarity] or RARITY_COLORS.Common
+
+        -- Filter rarity
+        local enabledRarities = M.FishConfig.EnabledRarities
+        if enabledRarities and next(enabledRarities) then
+            local hasFilter = false
+            local passed = false
+            for k, v in pairs(enabledRarities) do
+                hasFilter = true
+                local r = (type(k) == "string" and v == true) and k or v
+                if r == rarity then passed = true break end
+            end
+            if hasFilter and not passed then return end
+        end
+
+        local playerName = getDisplayName(M.FishConfig)
+        local mention = M.FishConfig.DiscordUserID ~= "" and "<@" .. M.FishConfig.DiscordUserID .. ">" or ""
+        local imageUrl = getImageUrl(fishData.ImageID)
+
+        local fishName = fishData.Name or data.FishID or "Unknown"
+        local weightStr = data.WeightFormatted or (string.format("%.2f Kg", data.Weight or 0))
+        local weightTier = data.WeightTier or "-"
+        local price = formatPrice(data.Price or fishData.Price or 0)
+        local basePrice = formatPrice(fishData.Price or 0)
+
+        local payload = {
+            username = "King Vypers",
+            avatar_url = "https://raw.githubusercontent.com/semuao621-wq/Kamunanya/main/Kingvyperslogo.jpg",
+            content = mention ~= "" and (mention .. " **" .. playerName .. "** caught a **" .. rarity .. "** fish!") or nil,
+            embeds = {{
+                author = { name = "King Vypers | Fish Caught" },
+                color = color,
+                fields = {
+                    { name = "🐟 Fish Name",   value = "```" .. fishName .. "```",  inline = false },
+                    { name = "⭐ Rarity",       value = "```" .. rarity .. "```",    inline = true  },
+                    { name = "⚖️ Weight",       value = "```" .. weightStr .. "```", inline = true  },
+                    { name = "🏆 Weight Tier",  value = "```" .. weightTier .. "```",inline = true  },
+                    { name = "💰 Base Price",   value = "```$" .. basePrice .. "```",inline = true  },
+                    { name = "💸 Sold For",     value = "```$" .. price .. "```",    inline = true  },
+                    { name = "👤 Player",       value = "```" .. playerName .. "```",inline = true  },
+                },
+                image = { url = imageUrl },
+                footer = {
+                    text = "King Vypers • " .. os.date("%m/%d/%Y at %I:%M %p"),
+                    icon_url = "https://raw.githubusercontent.com/semuao621-wq/Kamunanya/main/Kingvyperslogo.jpg"
+                },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
+
+        pcall(function()
+            httpRequest({
+                Url = M.FishConfig.WebhookURL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode(payload)
+            })
+        end)
+    end
+
+    local function sendDisconnectWebhook(reason)
+        if not isDisconnectEnabled then return end
+        local url = M.DisconnectConfig.WebhookURL
+        if not url or url == "" then return end
+        if not httpRequest then return end
+
+        local playerName = getDisplayName(M.DisconnectConfig)
+        local mention = M.DisconnectConfig.DiscordUserID ~= ""
+            and "<@" .. M.DisconnectConfig.DiscordUserID:gsub("%D", "") .. ">"
+            or ""
+
+        local payload = {
+            content = mention ~= "" and (mention .. " Account disconnected!") or nil,
+            username = "King Vypers",
+            avatar_url = "https://raw.githubusercontent.com/semuao621-wq/Kamunanya/main/Kingvyperslogo.jpg",
+            embeds = {{
+                author = { name = "King Vypers | Disconnect Alert" },
+                title = "⚠️ Connection Lost",
+                description = "Roblox session disconnected. Attempting rejoin...",
+                color = 16711680,
+                fields = {
+                    { name = "👤 Account", value = "```" .. playerName .. "```", inline = true },
+                    { name = "🕐 Time",    value = "```" .. os.date("%m/%d/%Y at %I:%M %p") .. "```", inline = true },
+                    { name = "📋 Reason",  value = "```" .. (reason or "Disconnected") .. "```", inline = false },
+                },
+                footer = {
+                    text = "King Vypers • Auto-rejoin enabled",
+                    icon_url = "https://raw.githubusercontent.com/semuao621-wq/Kamunanya/main/Kingvyperslogo.jpg"
+                },
+                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
+
+        task.spawn(function()
+            pcall(function()
+                httpRequest({
+                    Url = url, Method = "POST",
+                    Headers = { ["Content-Type"] = "application/json" },
+                    Body = HttpService:JSONEncode(payload)
+                })
+            end)
+        end)
+    end
+
+    local function setupDisconnectDetection()
+        if disconnectSetup then return end
+        disconnectSetup = true
+        local done = false
+
+        local function handleDisconnect(reason)
+            if not done and isDisconnectEnabled then
+                done = true
+                sendDisconnectWebhook(reason or "Disconnected from server")
+                task.wait(2)
+                game:GetService("TeleportService"):Teleport(game.PlaceId, game:GetService("Players").LocalPlayer)
+            end
+        end
+
+        game:GetService("GuiService").ErrorMessageChanged:Connect(function(msg)
+            if msg and msg ~= "" then handleDisconnect(msg) end
+        end)
+    end
+
+    -- Public API
+    function M:StartFishWebhook()
+        if isFishRunning then return end
+        if not httpRequest then print("[Webhook] HTTP ga tersedia!") return end
+        if not self.FishConfig.WebhookURL or self.FishConfig.WebhookURL == "" then
+            print("[Webhook] URL belum diisi!") return
+        end
+
+        local RS = game:GetService("ReplicatedStorage")
+        local ok, FishCaught = pcall(function()
+            return RS.Packages._Index["sleitnick_knit@1.7.0"].knit.Services.FishingRewardService.RE.FishCaught
+        end)
+        if not ok or not FishCaught then print("[Webhook] FishCaught event ga ketemu!") return end
+
+        fishEventConn = FishCaught.OnClientEvent:Connect(function(data)
+            task.spawn(sendFishWebhook, data)
+        end)
+        isFishRunning = true
+        print("[Webhook] Fish Webhook ON!")
+    end
+
+    function M:StopFishWebhook()
+        if not isFishRunning then return end
+        if fishEventConn then fishEventConn:Disconnect() fishEventConn = nil end
+        isFishRunning = false
+        print("[Webhook] Fish Webhook OFF!")
+    end
+
+    function M:EnableDisconnectWebhook(enabled)
+        self.DisconnectConfig.Enabled = enabled
+        isDisconnectEnabled = enabled
+        if enabled then setupDisconnectDetection() end
+    end
+
+    function M:TestFishWebhook()
+        if not httpRequest then return end
+        if not self.FishConfig.WebhookURL or self.FishConfig.WebhookURL == "" then return end
+        pcall(function()
+            httpRequest({
+                Url = self.FishConfig.WebhookURL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode({
+                    username = "King Vypers",
+                    avatar_url = "https://raw.githubusercontent.com/semuao621-wq/Kamunanya/main/Kingvyperslogo.jpg",
+                    embeds = {{
+                        title = "✅ Webhook Test Berhasil!",
+                        description = "Fish Webhook sudah terhubung dan siap menerima notifikasi!",
+                        color = 3066993,
+                        footer = {
+                            text = "King Vypers • Test",
+                            icon_url = "https://raw.githubusercontent.com/semuao621-wq/Kamunanya/main/Kingvyperslogo.jpg"
+                        },
+                        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                    }}
+                })
+            })
+        end)
+    end
+
+    function M:TestDisconnectWebhook()
+        sendDisconnectWebhook("Test - Simulasi Disconnect")
+    end
+
+    return M
+end)()
+
+-- =============================================
+-- FISH CAUGHT WEBHOOK SECTION
+-- =============================================
+local FishWebhookSection = WebhookTab:Section({
+    Title = "Fish Caught Webhook",
+    Box = true, TextXAlignment = "Center", TextSize = 15, Opened = true,
+})
+
+local fishToggleRef = nil
+
+FishWebhookSection:Input({
+    Title = "Webhook URL",
+    Type = "Input",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Callback = function(v)
+        WebhookModule.FishConfig.WebhookURL = v:gsub("^%s*(.-)%s*$", "%1")
+    end,
+})
+
+FishWebhookSection:Input({
+    Title = "Discord User ID",
+    Type = "Input",
+    Placeholder = "123456789012345678",
+    Callback = function(v)
+        WebhookModule.FishConfig.DiscordUserID = v:gsub("^%s*(.-)%s*$", "%1")
+    end,
+})
+
+FishWebhookSection:Input({
+    Title = "Custom Name",
+    Type = "Input",
+    Placeholder = "Masukkan nama custom...",
+    Callback = function(v)
+        WebhookModule.FishConfig.HideIdentity = v:gsub("^%s*(.-)%s*$", "%1")
+    end,
+})
+
+FishWebhookSection:Dropdown({
+    Title = "Filter Rarity (kosong = semua)",
+    Values = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Secret", "Monster" },
+    Value = {},
+    AllowNone = true,
+    Multi = true,
+    Callback = function(selected)
+        local rarityMap = {}
+        if type(selected) == "table" then
+            for _, v in ipairs(selected) do
+                rarityMap[v] = true
+            end
+        end
+        WebhookModule.FishConfig.EnabledRarities = rarityMap
+    end,
+})
+
+fishToggleRef = FishWebhookSection:Toggle({
+    Title = "Enable Fish Webhook",
+    Icon = "zap",
+    Default = false,
+    Callback = function(state)
+        if state then
+            if WebhookModule.FishConfig.WebhookURL == "" then
+                print("[Webhook] URL belum diisi!")
+                fishToggleRef:Set(false)
+                return
+            end
+            WebhookModule:StartFishWebhook()
+        else
+            WebhookModule:StopFishWebhook()
+        end
+    end,
+})
+
+FishWebhookSection:Button({
+    Title = "Test Fish Webhook",
+    Callback = function()
+        WebhookModule:TestFishWebhook()
+    end,
+})
+
+-- =============================================
+-- DISCONNECT WEBHOOK SECTION
+-- =============================================
+local DisconnectSection = WebhookTab:Section({
+    Title = "Disconnect Webhook",
+    Box = true, TextXAlignment = "Center", TextSize = 15, Opened = false,
+})
+
+DisconnectSection:Input({
+    Title = "Webhook URL",
+    Type = "Input",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Callback = function(v)
+        WebhookModule.DisconnectConfig.WebhookURL = v:gsub("^%s*(.-)%s*$", "%1")
+    end,
+})
+
+DisconnectSection:Input({
+    Title = "Discord User ID",
+    Type = "Input",
+    Placeholder = "123456789012345678",
+    Callback = function(v)
+        WebhookModule.DisconnectConfig.DiscordUserID = v:gsub("^%s*(.-)%s*$", "%1")
+    end,
+})
+
+DisconnectSection:Input({
+    Title = "Custom Name",
+    Type = "Input",
+    Placeholder = "Masukkan nama custom...",
+    Callback = function(v)
+        WebhookModule.DisconnectConfig.HideIdentity = v:gsub("^%s*(.-)%s*$", "%1")
+    end,
+})
+
+DisconnectSection:Toggle({
+    Title = "Enable Disconnect Webhook",
+    Icon = "wifi-off",
+    Default = false,
+    Callback = function(state)
+        WebhookModule:EnableDisconnectWebhook(state)
+    end,
+})
+
+DisconnectSection:Button({
+    Title = "Test Disconnect Webhook",
+    Callback = function()
+        WebhookModule:TestDisconnectWebhook()
+    end,
 })
