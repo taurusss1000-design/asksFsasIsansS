@@ -286,6 +286,24 @@ local InstantFishSection = Fishing:Section({ Title = "Instant Fish", Box = true,
 
 local instantFishEnabled = false
 local instantFishTask = nil
+local instantFishDelay = 3
+
+InstantFishSection:Input({
+    Title = "Fish Delay",
+    Value = "3",
+    InputIcon = "clock",
+    Type = "Input",
+    Placeholder = "Angka (Contoh: 3)",
+    Callback = function(input) 
+        local val = tonumber(input)
+        if val then
+            instantFishDelay = val
+            print("[Instant Fish] Delay diatur ke: " .. val .. " detik")
+        else
+            print("[Instant Fish] Input delay tidak valid!")
+        end
+    end
+})
 
 InstantFishSection:Toggle({
     Title = "Instant Fishing",
@@ -386,8 +404,8 @@ InstantFishSection:Toggle({
                         print("[Instant Fish] RequestFishBite gagal / tidak ada session.")
                     end
                     
-                    -- Kasih jeda 3 detik biar server ready dan ga too_early
-                    task.wait(3)
+                    -- Kasih jeda sesuai input biar server ready dan ga too_early
+                    task.wait(instantFishDelay)
 
                     -- 5. StartPulling
                     pcall(function() START_PULLING:InvokeServer() end)
