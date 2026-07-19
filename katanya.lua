@@ -1,7 +1,7 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 -- Nonaktifkan print & warn untuk modul ini agar console tidak spam
--- local print = function(...) end
--- local warn = function(...) end
+local print = function(...) end
+local warn = function(...) end
 
 
 local Window = WindUI:CreateWindow({
