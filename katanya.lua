@@ -1355,3 +1355,86 @@ TeleportSection:Button({
         end
     end
 })
+
+
+-- =============================================
+-- Settings Tab
+-- =============================================
+
+local SettingsTab = Window:Tab({
+    Title = "Settings",
+    Icon = "crosshair",
+    IconColor = Mains,
+    IconShape = "Square",
+    Border = true,
+})
+
+local SettingsSection = SettingsTab:Section({ Title = "Protection", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = true })
+
+-- =============================================
+-- ANTI-AFK MODULE
+-- =============================================
+local AntiAFK = (function()
+    local AA = {
+        Enabled = false,
+        Thread = nil,
+        Conn = nil,
+    }
+
+    function AA.Start()
+        if AA.Enabled then return end
+        AA.Enabled = true
+
+        local VirtualUser = game:GetService("VirtualUser")
+        
+        -- Bypass Anti-AFK Roblox native yang paling ampuh (jalan di background saat idled)
+        AA.Conn = game:GetService("Players").LocalPlayer.Idled:Connect(function()
+            if AA.Enabled then
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+                print("[Anti-AFK] Roblox Idle bypassed!")
+            end
+        end)
+
+        AA.Thread = task.spawn(function()
+            while AA.Enabled do
+                task.wait(600)
+                if not AA.Enabled then break end
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new())
+                end)
+            end
+        end)
+    end
+
+    function AA.Stop()
+        if not AA.Enabled then return end
+        AA.Enabled = false
+        if AA.Thread then
+            task.cancel(AA.Thread)
+            AA.Thread = nil
+        end
+        if AA.Conn then
+            AA.Conn:Disconnect()
+            AA.Conn = nil
+        end
+    end
+
+    return AA
+end)()
+
+SettingsSection:Toggle({
+    Title = "Anti-AFK",
+    Icon = "shield-check",
+    Default = false,
+    Callback = function(state)
+        if state then
+            AntiAFK.Start()
+            print("[Anti-AFK] Activated!")
+        else
+            AntiAFK.Stop()
+            print("[Anti-AFK] Deactivated!")
+        end
+    end
+})
