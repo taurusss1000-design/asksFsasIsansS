@@ -1,5 +1,5 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
---Nonaktifkan print & warn untuk modul ini agar console tidak spam
+-- Nonaktifkan print & warn untuk modul ini agar console tidak spam
 local print = function(...) end
 local warn = function(...) end
 
@@ -348,37 +348,46 @@ InstantFishSection:Toggle({
 
                 -- Listener resolved
                 local isResolved = false
+                local activeSessionId = nil
                 local resolvedConn
                 resolvedConn = PULL_STATE_EVENT.OnClientEvent:Connect(function(data)
                     if type(data) == "table" and data.sessionId and data.type == "resolved" then
-                        isResolved = true
+                        if data.sessionId == activeSessionId then
+                            isResolved = true
+                        end
                     end
                 end)
 
                 while instantFishEnabled do
                     isResolved = false
+                    activeSessionId = nil
                     local playerPos, castPos, rodName = getCastPos()
 
                     -- 1. StartFishing
                     pcall(function() START_FISHING:InvokeServer(rodName, FLOATER) end)
-                    task.wait(0.3)
+                    task.wait(0.2)
 
                     -- 2. ThrowFloater
                     pcall(function() THROW_FLOATER:InvokeServer(playerPos, castPos, rodName, FLOATER, FLOATER_PROPS, 10) end)
-                    task.wait(0.3)
+                    task.wait(0.2)
 
                     -- 3. ConfirmFloatingCast
                     pcall(function() CONFIRM_CAST:InvokeServer(castPos) end)
-                    task.wait(0.3)
+                    task.wait(0.2)
 
                     -- 4. RequestFishBite -> ambil SessionId dari response!
                     local sessionId = nil
                     local ok, result = pcall(function() return REQUEST_FISH_BITE:InvokeServer(castPos) end)
                     if ok and type(result) == "table" and result.SessionId then
                         sessionId = result.SessionId
+                        activeSessionId = sessionId
                         print("[Instant Fish] Session:", sessionId)
+                    else
+                        print("[Instant Fish] RequestFishBite gagal / tidak ada session.")
                     end
-                    task.wait(0.1)
+                    
+                    -- Kasih jeda 3 detik biar server ready dan ga too_early
+                    task.wait(3)
 
                     -- 5. StartPulling
                     pcall(function() START_PULLING:InvokeServer() end)
@@ -386,15 +395,15 @@ InstantFishSection:Toggle({
 
                     -- 6. Spam tap sampai resolved!
                     if sessionId then
+                        -- begin SEKALI
                         pcall(function() FISHING_PULL_INPUT:InvokeServer(sessionId, "begin") end)
                         task.wait(0.05)
 
+                        -- spam tap per frame sampai resolved
                         local waitStart = tick()
                         while not isResolved and instantFishEnabled and tick() - waitStart < 15 do
                             task.spawn(function()
-                                for i = 1, 5 do
-                                    pcall(function() FISHING_PULL_INPUT:InvokeServer(sessionId, "tap") end)
-                                end
+                                pcall(function() FISHING_PULL_INPUT:InvokeServer(sessionId, "tap") end)
                             end)
                             task.wait()
                         end
@@ -404,7 +413,7 @@ InstantFishSection:Toggle({
                         print("[Instant Fish] Gagal dapet SessionId, skip...")
                     end
 
-                    -- Stop & jeda
+                    -- Stop & jeda antar mancing
                     pcall(function() STOP_FISHING:InvokeServer() end)
                     task.wait(2)
                 end
@@ -1325,131 +1334,6 @@ TeleportSection:Button({
             if localChar and localChar:FindFirstChild("HumanoidRootPart") then
                 localChar.HumanoidRootPart.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
             end
-        end
-    end
-})
-
-
-local TeleportToEvent = TeleportTab:Section({ Title = "Teleport Event", Box = true, TextXAlignment = "Center", TextSize = 15, Opened = true })
-
-local Players = game:GetService("Players")
-local selectedEvent = nil
-local autoTeleportEnabled = false
-local autoTeleportConnection = nil
-
-local eventList = Players.LocalPlayer.PlayerGui.EventHudGui.Root.EventPanel.EventList
-
--- ambil event dari GUI (hanya boss_fish, skip weather dll)
-local function getEventNames()
-    local names = {}
-    for _, v in ipairs(eventList:GetChildren()) do
-        if v:IsA("Frame") and v.Name:sub(1, 5) == "Card_" then
-            -- ambil nama dari TextHolder.Name label
-            local inner = v:FindFirstChild("Inner")
-            if inner then
-                local textHolder = inner:FindFirstChild("TextHolder")
-                if textHolder then
-                    local nameLabel = textHolder:FindFirstChild("Name")
-                    if nameLabel then
-                        table.insert(names, nameLabel.Text)
-                    end
-                end
-            end
-        end
-    end
-    if #names == 0 then
-        table.insert(names, "No Event")
-    end
-    return names
-end
-
--- cari folder di workspace.Event yang namanya mengandung eventName
-local function getEventPosition(eventName)
-    for _, folder in ipairs(workspace.Event:GetChildren()) do
-        if folder.Name:lower():find(eventName:lower()) then
-            local point = folder:FindFirstChild("Event Point")
-            if point then
-                return point.Position
-            end
-        end
-    end
-    return nil
-end
-
-local function teleportToEvent(eventName)
-    local pos = getEventPosition(eventName)
-    if not pos then
-        warn("Event point tidak ditemukan untuk: " .. eventName)
-        return
-    end
-    local char = Players.LocalPlayer.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        char.HumanoidRootPart.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-    end
-end
-
--- Dropdown
-local EventDropdown = TeleportToEvent:Dropdown({
-    Title = "Select Event",
-    Desc = "Pilih event dari HUD",
-    Values = getEventNames(),
-    Value = getEventNames()[1],
-    Callback = function(option)
-        selectedEvent = option
-    end
-})
-selectedEvent = getEventNames()[1]
-
--- Refresh
-TeleportToEvent:Button({
-    Title = "Refresh Events",
-    Desc = "Update list event dari HUD",
-    Callback = function()
-        local names = getEventNames()
-        EventDropdown:SetValues(names)
-        EventDropdown:SetValue(names[1])
-        selectedEvent = names[1]
-    end
-})
-
--- Auto Teleport
-TeleportToEvent:Toggle({
-    Title = "Auto Teleport",
-    Desc = "Auto teleport saat event baru muncul di HUD",
-    Value = false,
-    Callback = function(state)
-        autoTeleportEnabled = state
-        if state then
-            autoTeleportConnection = eventList.ChildAdded:Connect(function(child)
-                if not autoTeleportEnabled then return end
-                task.wait(0.5)
-                local inner = child:FindFirstChild("Inner")
-                if inner then
-                    local textHolder = inner:FindFirstChild("TextHolder")
-                    if textHolder then
-                        local nameLabel = textHolder:FindFirstChild("Name")
-                        if nameLabel then
-                            teleportToEvent(nameLabel.Text)
-                        end
-                    end
-                end
-            end)
-        else
-            if autoTeleportConnection then
-                autoTeleportConnection:Disconnect()
-                autoTeleportConnection = nil
-            end
-        end
-    end
-})
-
--- Teleport Now
-TeleportToEvent:Button({
-    Title = "Teleport Now",
-    Desc = "Teleport ke event yang dipilih",
-    Callback = function()
-        if selectedEvent and selectedEvent ~= "No Event" then
-            teleportToEvent(selectedEvent)
         end
     end
 })
